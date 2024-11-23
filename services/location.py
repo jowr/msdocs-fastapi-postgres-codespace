@@ -1,8 +1,9 @@
 import sys
 import numpy as np
-from enum import Enum
+from enum import StrEnum
 
 import openmeteo_requests
+from openmeteo_sdk.Variable import Variable
 import requests_cache
 from retry_requests import retry
 
@@ -35,7 +36,7 @@ retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
 om = openmeteo_requests.Client(session=retry_session)
 
 
-class OmVariableEnum(Enum, str):
+class OmVariableEnum(StrEnum):
     TempAir = "temperature_2m"
     RelHum = "relative_humidity_2m"
     DePoint = "dew_point_2m"
@@ -45,72 +46,60 @@ class OmVariableEnum(Enum, str):
     Precipitation = "precipitation"
 
 
-def main():
-    coord = get_coordinates("New York", "USA")
-    print(f"{coord[0]},{coord[1]}")
-
-    from openmeteo_sdk.Variable import Variable
-
+def prepare_om_params(lat: float, long: float) -> dict[str, str | float]:
     params = {
-        "latitude": 52.54,
-        "longitude": 13.41,
-        "hourly": ["temperature_2m", "precipitation", "wind_speed_10m"],
-        "current": ["temperature_2m", "relative_humidity_2m"],
+        "latitude": lat,
+        "longitude": long,
+        "hourly": [entry.value for entry in OmVariableEnum],
+        # "current": ["temperature_2m", "relative_humidity_2m"],
     }
+    return params
 
-    responses = om.weather_api("https://api.open-meteo.com/v1/forecast", params=params)
-    response = responses[0]
-    print(f"Coordinates {response.Latitude()}°N {response.Longitude()}°E")
-    print(f"Elevation {response.Elevation()} m asl")
-    print(f"Timezone {response.Timezone()} {response.TimezoneAbbreviation()}")
-    print(f"Timezone difference to GMT+0 {response.UtcOffsetSeconds()} s")
 
-    # Current values
-    current = response.Current()
-    current_variables = list(
-        map(lambda i: current.Variables(i), range(0, current.VariablesLength()))
-    )
-    current_temperature_2m = next(
-        filter(
-            lambda x: x.Variable() == Variable.temperature and x.Altitude() == 2,
-            current_variables,
+def make_call(city, country):
+    lat, long = get_coordinates(city, country)
+    params = prepare_om_params(lat, long)
+    return params
+
+
+def main():
+    for params in [
+        make_call("New York", "USA"),
+        make_call("Copenhagen", "Denmark"),
+        make_call("Zürich", "Switzerland"),
+        make_call("Sydney", "Australia"),
+    ]:
+
+        responses = om.weather_api(
+            "https://api.open-meteo.com/v1/forecast", params=params
         )
-    )
-    current_relative_humidity_2m = next(
-        filter(
-            lambda x: x.Variable() == Variable.relative_humidity and x.Altitude() == 2,
-            current_variables,
+        response = responses[0]
+        print(f"Coordinates {response.Latitude()}°N {response.Longitude()}°E")
+        print(f"Elevation {response.Elevation()} m asl")
+
+        hourly = response.Hourly()
+        hourly_time = range(hourly.Time(), hourly.TimeEnd(), hourly.Interval())
+        hourly_variables = list(
+            map(lambda i: hourly.Variables(i), range(0, hourly.VariablesLength()))
         )
-    )
 
-    print(f"Current time {current.Time()}")
-    print(f"Current temperature_2m {current_temperature_2m.Value()}")
-    print(f"Current relative_humidity_2m {current_relative_humidity_2m.Value()}")
+        hourly_temperature_2m = next(
+            filter(
+                lambda x: x.Variable() == Variable.temperature and x.Altitude() == 2,
+                hourly_variables,
+            )
+        ).ValuesAsNumpy()
+        hourly_precipitation = next(
+            filter(lambda x: x.Variable() == Variable.precipitation, hourly_variables)
+        ).ValuesAsNumpy()
+        hourly_wind_speed_10m = next(
+            filter(
+                lambda x: x.Variable() == Variable.wind_speed and x.Altitude() == 10,
+                hourly_variables,
+            )
+        ).ValuesAsNumpy()
 
-    hourly = response.Hourly()
-    hourly_time = range(hourly.Time(), hourly.TimeEnd(), hourly.Interval())
-    hourly_variables = list(
-        map(lambda i: hourly.Variables(i), range(0, hourly.VariablesLength()))
-    )
-
-    hourly_temperature_2m = next(
-        filter(
-            lambda x: x.Variable() == Variable.temperature and x.Altitude() == 2,
-            hourly_variables,
-        )
-    ).ValuesAsNumpy()
-    hourly_precipitation = next(
-        filter(lambda x: x.Variable() == Variable.precipitation, hourly_variables)
-    ).ValuesAsNumpy()
-    hourly_wind_speed_10m = next(
-        filter(
-            lambda x: x.Variable() == Variable.wind_speed and x.Altitude() == 10,
-            hourly_variables,
-        )
-    ).ValuesAsNumpy()
-
-    vec = np.asarray(hourly_temperature_2m)
-    print(vec)
+        print(np.mean(hourly_temperature_2m))
 
 
 if __name__ == "__main__":
