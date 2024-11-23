@@ -5,3 +5,9 @@ psycopg2==2.9.6
 python-dotenv==1.0.0
 SQLAlchemy==2.0.12
 faker==18.7.0
+
+openmeteo-requests==1.3.0
+osmpythontools==0.3.5
+requests-cache==1.2.1
+retry-requests==2.0.0
+numpy==2.1.3
